@@ -42,21 +42,33 @@ app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 DB_USER = os.getenv("DB_USER", "root")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", "3307"))
+DB_PORT = int(os.getenv("DB_PORT") or "3307")
 DB_NAME = os.getenv("DB_NAME", "shrimpguard_users")
 
-app.config["SQLALCHEMY_DATABASE_URI"] = (
-    os.getenv("DATABASE_URL")
-    or URL.create(
-        "mysql+pymysql",
-        username=DB_USER,
-        password=DB_PASSWORD or None,
-        host=DB_HOST,
-        port=DB_PORT,
-        database=DB_NAME,
-        query={"charset": "utf8mb4"},
-    )
-)
+
+def get_database_uri():
+    configured_database_url = os.getenv("DATABASE_URL")
+    if configured_database_url:
+        return configured_database_url
+
+    if any(
+        os.getenv(env_var) is not None
+        for env_var in ("DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME")
+    ):
+        return URL.create(
+            "mysql+pymysql",
+            username=DB_USER,
+            password=DB_PASSWORD or None,
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            query={"charset": "utf8mb4"},
+        )
+
+    return "sqlite:///dashboard.db"
+
+
+app.config["SQLALCHEMY_DATABASE_URI"] = get_database_uri()
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
 
@@ -74,9 +86,16 @@ def inject_logout_csrf_token():
     }
 
 
+def table_args_for_schema(schema_name):
+    database_url = str(app.config["SQLALCHEMY_DATABASE_URI"])
+    if database_url.startswith("sqlite"):
+        return {}
+    return {"schema": schema_name}
+
+
 class PondReading(db.Model):
     __tablename__ = "pond_readings"
-    __table_args__ = {"schema": "shrimpguard_sensors"}
+    __table_args__ = table_args_for_schema("shrimpguard_sensors")
 
     id = db.Column(db.Integer, primary_key=True)
     temperature = db.Column(db.Float, nullable=False)
@@ -98,7 +117,7 @@ class PondReading(db.Model):
 
 class AlertLog(db.Model):
     __tablename__ = "alert_logs"
-    __table_args__ = {"schema": "shrimpguard_sensors"}
+    __table_args__ = table_args_for_schema("shrimpguard_sensors")
 
     id = db.Column(db.Integer, primary_key=True)
     alert_type = db.Column(db.String(100), nullable=False)
@@ -118,7 +137,7 @@ class AlertLog(db.Model):
 
 class User(db.Model):
     __tablename__ = "users"
-    __table_args__ = {"schema": "shrimpguard_users"}
+    __table_args__ = table_args_for_schema("shrimpguard_users")
 
     email = db.Column(db.String(255), primary_key=True)
     user_name = db.Column("name", db.String(80), nullable=False, unique=True)
